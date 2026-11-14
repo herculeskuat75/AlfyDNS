@@ -1,4 +1,4 @@
-name: Build AlfyDNS with Auto-Unzip & New Golibs (Correct Makefile Path)
+name: Build AlfyDNS with Auto-Unzip & New Golibs (Fixed Gomobile PATH)
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
           echo "Project root: $ROOT"
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Clone SlipNet & Skip Missing Submodule
+      - name: Clone SlipNet & Instal Gomobile
         run: |
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git clone https://github.com/anonvector/SlipNet.git /tmp/SlipNet
@@ -41,17 +41,21 @@ jobs:
           git config --global submodule.dnstt-mobile.update none
           git submodule update --init --recursive
           
+          # Instal gomobile
           go install golang.org/x/mobile/cmd/gomobile@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile init
+          
+          # TRIK SAKTI: Beri tahu robot di mana gomobile berada
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          
+          # Jalankan init agar gomobile siap dipakai
+          $HOME/go/bin/gomobile init
 
       - name: Build Golibs AAR (Target Full)
         run: |
           cd /tmp/SlipNet
-          # PERBAIKAN: Jalankan make di dalam folder gomobile-build
+          # Jalankan make (gomobile sekarang sudah bisa ditemukan)
           make -C gomobile-build build-full
           
-          # Salin hasilnya ke workspace proyek kita
           cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
 
       - uses: actions/setup-java@v4
