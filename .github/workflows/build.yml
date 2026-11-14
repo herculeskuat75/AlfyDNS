@@ -14,37 +14,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. SIAPKAN PROJECT (Otomatis bongkar ZIP)
       - name: Siapkan project dari ZIP
         shell: bash
         run: |
           set -e
           SRC="$GITHUB_WORKSPACE/_src"
           mkdir -p "$SRC"
-          
-          # Cari ZIP di halaman utama dan ekstrak
           ZIP=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
           if [ -n "$ZIP" ]; then
             echo "Mengekstrak $ZIP..."
             unzip -o -q "$ZIP" -d "$SRC"
           fi
-
-          # Cari folder yang punya settings.gradle.kts
           ROOT=$(find "$SRC" -maxdepth 6 \( -name settings.gradle.kts -o -name settings.gradle \) -not -path '*/__MACOSX/*' -printf '%d %h\n' | sort -n | head -n1 | cut -d' ' -f2-)
-          
           if [ -z "$ROOT" ]; then
             echo "::error::settings.gradle(.kts) tidak ditemukan di dalam ZIP."
             exit 1
           fi
-
           echo "Project root: $ROOT"
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
 
-      # 2. RAKIT GOLIBS.AAR BARU DARI SLIPNET
       - name: Clone SlipNet & Siapkan Go/gomobile
         run: |
+          # TRIK SAKTI: Konfigurasi Git agar pakai token GitHub Actions
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
           git clone https://github.com/anonvector/SlipNet.git /tmp/SlipNet
           cd /tmp/SlipNet
+          # Update submodule dengan konfigurasi token yang baru
           git submodule update --init --recursive
           
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -55,12 +50,8 @@ jobs:
         run: |
           cd /tmp/SlipNet
           make build-full
-          
-          # Timpa golibs.aar lama di proyek Kakak dengan yang baru
-          echo "Menimpa golibs.aar..."
           cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
 
-      # 3. BUILD APK RELEASE
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -74,7 +65,6 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      # 4. UPLOAD KE RELEASES
       - name: Cari APK dan tentukan nama dinamis
         id: ver
         shell: bash
@@ -86,10 +76,8 @@ jobs:
             echo "::error::File APK tidak ditemukan setelah build."
             exit 1
           fi
-          
           VN=$(grep -rhoE 'versionName *= *"[^"]+"' --include=build.gradle.kts --include=build.gradle . | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           VN=${VN:-0}
-          
           APP_NAME="AlfyDNS"
           cp "$APK" "$GITHUB_WORKSPACE/${APP_NAME}-v${VN}-${{ github.run_number }}.apk"
           echo "apk=${APP_NAME}-v${VN}-${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
