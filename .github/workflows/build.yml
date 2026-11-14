@@ -1,4 +1,4 @@
-name: Universal APK Builder & Release
+name: Build AlfyDNS with New Golibs
 
 on:
   push:
@@ -14,6 +14,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ==========================================================
+      # TAHAP 1: MERAKIT GOLIBS.AAR YANG BARU DARI SOURCE SLIPNET
+      # ==========================================================
+      - name: Clone SlipNet & Siapkan Go/gomobile
+        run: |
+          git clone https://github.com/anonvector/SlipNet.git /tmp/SlipNet
+          cd /tmp/SlipNet
+          # Inisialisasi submodule (penting untuk library Go-nya)
+          git submodule update --init --recursive
+          
+          # Siapkan Go
+          go version
+          # Install gomobile
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
+          gomobile init
+
+      - name: Build Golibs AAR (Target Full)
+        run: |
+          cd /tmp/SlipNet
+          # Jalankan perintah build-full sesuai Makefile resmi SlipNet
+          make build-full
+          
+          # Salin hasilnya ke workspace proyek kita
+          # Output aslinya adalah golibs-full.aar, kita rename jadi golibs.aar
+          cp app/libs/golibs-full.aar $GITHUB_WORKSPACE/app/libs/golibs.aar
+
+      # ==========================================================
+      # TAHAP 2: BUILD APLIKASI ALFYDNS KAKAK
+      # ==========================================================
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,62 +53,19 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Siapkan project
-        shell: bash
+      - name: Build Release APK
+        working-directory: ${{ github.workspace }}
         run: |
-          set -e
-          SRC="$GITHUB_WORKSPACE/_src"
-          mkdir -p "$SRC"
+          # Build versi Release (bukan Debug) agar tidak kena error "Kehabisan ruang" (res=-18)
+          gradle assembleRelease --no-daemon --stacktrace
 
-          find_root() {
-            find "$1" -maxdepth 6 \( -name settings.gradle.kts -o -name settings.gradle \) \
-              -not -path '*/.git/*' -not -path '*/_src/*' -not -path '*/__MACOSX/*' \
-              -not -path '*/build/*' -printf '%d %h\n' 2>/dev/null | sort -n | head -n1 | cut -d' ' -f2-
-          }
-
-          ROOT=$(find_root "$GITHUB_WORKSPACE")
-          if [ -z "$ROOT" ]; then
-            ROOT=$(find "$SRC" -maxdepth 6 \( -name settings.gradle.kts -o -name settings.gradle \) -not -path '*/__MACOSX/*' -printf '%d %h\n' | sort -n | head -n1 | cut -d' ' -f2-)
-          fi
-
-          if [ -z "$ROOT" ]; then
-            i=0
-            while IFS= read -r z; do
-              i=$((i+1))
-              echo "Ekstrak: $z"
-              unzip -o -q "$z" -d "$SRC/z$i" || true
-            done < <(find "$GITHUB_WORKSPACE" -maxdepth 2 -iname '*.zip' -not -path '*/.git/*' -not -path '*/_src/*')
-
-            for round in 1 2 3; do
-              ROOT=$(find "$SRC" -maxdepth 6 \( -name settings.gradle.kts -o -name settings.gradle \) -not -path '*/__MACOSX/*' -printf '%d %h\n' | sort -n | head -n1 | cut -d' ' -f2-)
-              [ -n "$ROOT" ] && break
-              found=0
-              while IFS= read -r z; do
-                [ -d "$z.x" ] && continue
-                found=1
-                echo "Ekstrak zip dalam: $z"
-                unzip -o -q "$z" -d "$z.x" || true
-              done < <(find "$SRC" -maxdepth 6 -iname '*.zip')
-              [ "$found" = 0 ] && break
-            done
-          fi
-
-          if [ -z "$ROOT" ]; then
-            echo "::error::settings.gradle(.kts) tidak ditemukan."
-            exit 1
-          fi
-
-          echo "Project root: $ROOT"
-          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
-
-      - name: Build release APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleRelease --no-daemon --stacktrace
-
+      # ==========================================================
+      # TAHAP 3: UPLOAD HASIL KE GITHUB RELEASE
+      # ==========================================================
       - name: Cari APK dan tentukan nama dinamis
         id: ver
         shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}
+        working-directory: ${{ github.workspace }}
         run: |
           set +e
           APK=$(find . -name "*.apk" | head -n 1)
@@ -90,22 +77,19 @@ jobs:
           VN=$(grep -rhoE 'versionName *= *"[^"]+"' --include=build.gradle.kts --include=build.gradle . | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           VN=${VN:-0}
           
-          APP_NAME=$(grep -m 1 'rootProject.name' settings.gradle.kts settings.gradle 2>/dev/null | sed -E 's/.*= *["'\''](.*)["'\'']/\1/' | tr -d '[:space:]')
-          APP_NAME=${APP_NAME:-AlfyProject}
-          
+          APP_NAME="AlfyDNS"
           cp "$APK" "$GITHUB_WORKSPACE/${APP_NAME}-v${VN}-${{ github.run_number }}.apk"
           echo "apk=${APP_NAME}-v${VN}-${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
           echo "tag=v${VN}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-          echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.ver.outputs.app_name }}-apk
+          name: AlfyDNS-release-apk
           path: ${{ steps.ver.outputs.apk }}
 
       - name: Buat GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: ${{ steps.ver.outputs.app_name }} ${{ steps.ver.outputs.tag }}
+          name: AlfyDNS ${{ steps.ver.outputs.tag }}
           files: ${{ steps.ver.outputs.apk }}
