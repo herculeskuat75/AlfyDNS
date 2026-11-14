@@ -1,4 +1,4 @@
-name: Build AlfyDNS with Auto-Unzip & New Golibs (Skip Missing Submodule)
+name: Build AlfyDNS with Auto-Unzip & New Golibs (Correct Makefile Path)
 
 on:
   push:
@@ -35,16 +35,10 @@ jobs:
 
       - name: Clone SlipNet & Skip Missing Submodule
         run: |
-          # TRIK SAKTI 1: Konfigurasi Git agar pakai token GitHub Actions
           git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          
           git clone https://github.com/anonvector/SlipNet.git /tmp/SlipNet
           cd /tmp/SlipNet
-          
-          # TRIK SAKTI 2: Beri tahu Git untuk TIDAK mengunduh submodule dnstt-mobile
           git config --global submodule.dnstt-mobile.update none
-          
-          # Update submodule (dnstt-mobile akan otomatis dilewati)
           git submodule update --init --recursive
           
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -54,8 +48,8 @@ jobs:
       - name: Build Golibs AAR (Target Full)
         run: |
           cd /tmp/SlipNet
-          # Jalankan perintah build-full
-          make build-full
+          # PERBAIKAN: Jalankan make di dalam folder gomobile-build
+          make -C gomobile-build build-full
           
           # Salin hasilnya ke workspace proyek kita
           cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
