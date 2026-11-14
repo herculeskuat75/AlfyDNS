@@ -1,0 +1,108 @@
+name: Build AlfyDNS with Auto-Unzip & New Golibs
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. SIAPKAN PROJECT (Otomatis bongkar ZIP)
+      - name: Siapkan project dari ZIP
+        shell: bash
+        run: |
+          set -e
+          SRC="$GITHUB_WORKSPACE/_src"
+          mkdir -p "$SRC"
+          
+          # Cari ZIP di halaman utama dan ekstrak
+          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
+          if [ -n "$ZIP" ]; then
+            echo "Mengekstrak $ZIP..."
+            unzip -o -q "$ZIP" -d "$SRC"
+          fi
+
+          # Cari folder yang punya settings.gradle.kts
+          ROOT=$(find "$SRC" -maxdepth 6 \( -name settings.gradle.kts -o -name settings.gradle \) -not -path '*/__MACOSX/*' -printf '%d %h\n' | sort -n | head -n1 | cut -d' ' -f2-)
+          
+          if [ -z "$ROOT" ]; then
+            echo "::error::settings.gradle(.kts) tidak ditemukan di dalam ZIP."
+            exit 1
+          fi
+
+          echo "Project root: $ROOT"
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+
+      # 2. RAKIT GOLIBS.AAR BARU DARI SLIPNET
+      - name: Clone SlipNet & Siapkan Go/gomobile
+        run: |
+          git clone https://github.com/anonvector/SlipNet.git /tmp/SlipNet
+          cd /tmp/SlipNet
+          git submodule update --init --recursive
+          
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
+          gomobile init
+
+      - name: Build Golibs AAR (Target Full)
+        run: |
+          cd /tmp/SlipNet
+          make build-full
+          
+          # Timpa golibs.aar lama di proyek Kakak dengan yang baru
+          echo "Menimpa golibs.aar..."
+          cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
+
+      # 3. BUILD APK RELEASE
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build Release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      # 4. UPLOAD KE RELEASES
+      - name: Cari APK dan tentukan nama dinamis
+        id: ver
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set +e
+          APK=$(find . -name "*.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "::error::File APK tidak ditemukan setelah build."
+            exit 1
+          fi
+          
+          VN=$(grep -rhoE 'versionName *= *"[^"]+"' --include=build.gradle.kts --include=build.gradle . | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VN=${VN:-0}
+          
+          APP_NAME="AlfyDNS"
+          cp "$APK" "$GITHUB_WORKSPACE/${APP_NAME}-v${VN}-${{ github.run_number }}.apk"
+          echo "apk=${APP_NAME}-v${VN}-${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VN}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AlfyDNS-release-apk
+          path: ${{ steps.ver.outputs.apk }}
+
+      - name: Buat GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: AlfyDNS ${{ steps.ver.outputs.tag }}
+          files: ${{ steps.ver.outputs.apk }}
