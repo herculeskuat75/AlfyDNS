@@ -1,4 +1,4 @@
-name: Build AlfyDNS with Auto-Unzip & New Golibs (Fixed Gomobile PATH)
+name: Build AlfyDNS (Fix setSayeMode Error)
 
 on:
   push:
@@ -41,22 +41,21 @@ jobs:
           git config --global submodule.dnstt-mobile.update none
           git submodule update --init --recursive
           
-          # Instal gomobile
           go install golang.org/x/mobile/cmd/gomobile@latest
-          
-          # TRIK SAKTI: Beri tahu robot di mana gomobile berada
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          
-          # Jalankan init agar gomobile siap dipakai
           $HOME/go/bin/gomobile init
 
       - name: Build Golibs AAR (Target Full)
         run: |
           cd /tmp/SlipNet
-          # Jalankan make (gomobile sekarang sudah bisa ditemukan)
           make -C gomobile-build build-full
-          
           cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
+
+      - name: Hapus setSayeMode dari DnsttWrapper.kt
+        run: |
+          # TRIK SAKTI: Hapus baris yang mengandung setSayeMode
+          sed -i '/setSayeMode/d' ${{ env.PROJECT_DIR }}/app/src/main/java/com/alfydns/app/DnsttWrapper.kt
+          echo "Baris setSayeMode berhasil dihapus."
 
       - uses: actions/setup-java@v4
         with:
