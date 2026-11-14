@@ -1,4 +1,4 @@
-name: Build AlfyDNS (Fix setSayeMode Error)
+name: Build AlfyDNS (ABI Split & Signed)
 
 on:
   push:
@@ -40,7 +40,6 @@ jobs:
           cd /tmp/SlipNet
           git config --global submodule.dnstt-mobile.update none
           git submodule update --init --recursive
-          
           go install golang.org/x/mobile/cmd/gomobile@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           $HOME/go/bin/gomobile init
@@ -53,9 +52,7 @@ jobs:
 
       - name: Hapus setSayeMode dari DnsttWrapper.kt
         run: |
-          # TRIK SAKTI: Hapus baris yang mengandung setSayeMode
           sed -i '/setSayeMode/d' ${{ env.PROJECT_DIR }}/app/src/main/java/com/alfydns/app/DnsttWrapper.kt
-          echo "Baris setSayeMode berhasil dihapus."
 
       - uses: actions/setup-java@v4
         with:
@@ -66,31 +63,47 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build Release APK
+      # PERBAIKAN: Generate Keystore & Build dengan ABI Split
+      - name: Build Release APK (Signed & ABI Split)
         working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          # 1. Bikin keystore
+          keytool -genkey -v -keystore release.keystore -alias alfykey -keyalg RSA -keysize 2048 -validity 10000 -storepass alfy123 -keypass alfy123 -dname "CN=Alfy, OU=Dev, O=Alfy, L=City, S=State, C=ID"
+          
+          # 2. Build dengan signing & ABI split
+          gradle assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.keystore \
+            -Pandroid.injected.signing.store.password=alfy123 \
+            -Pandroid.injected.signing.key.alias=alfykey \
+            -Pandroid.injected.signing.key.password=alfy123
 
-      - name: Cari APK dan tentukan nama dinamis
+      - name: Cari APK arm64-v8a
         id: ver
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set +e
-          APK=$(find . -name "*.apk" | head -n 1)
+          # Cari APK khusus arm64-v8a
+          APK=$(find . -path "*/release/*arm64-v8a*.apk" | head -n 1)
           if [ -z "$APK" ]; then
-            echo "::error::File APK tidak ditemukan setelah build."
+            echo "::warning::APK arm64-v8a tidak ditemukan, mencoba cari APK universal..."
+            APK=$(find . -path "*/release/*.apk" | head -n 1)
+          fi
+          if [ -z "$APK" ]; then
+            echo "::error::File APK tidak ditemukan."
             exit 1
           fi
+          
           VN=$(grep -rhoE 'versionName *= *"[^"]+"' --include=build.gradle.kts --include=build.gradle . | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           VN=${VN:-0}
-          APP_NAME="AlfyDNS"
+          APP_NAME="AlfyDNS-arm64"
           cp "$APK" "$GITHUB_WORKSPACE/${APP_NAME}-v${VN}-${{ github.run_number }}.apk"
           echo "apk=${APP_NAME}-v${VN}-${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
           echo "tag=v${VN}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AlfyDNS-release-apk
+          name: AlfyDNS-arm64-apk
           path: ${{ steps.ver.outputs.apk }}
 
       - name: Buat GitHub Release
