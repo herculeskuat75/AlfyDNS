@@ -1,4 +1,4 @@
-name: Build AlfyDNS (ABI Split & Signed)
+name: Build AlfyDNS (Export ZIP with New AAR)
 
 on:
   push:
@@ -32,6 +32,7 @@ jobs:
           fi
           echo "Project root: $ROOT"
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+          echo "SRC_DIR=$SRC" >> "$GITHUB_ENV"
 
       - name: Clone SlipNet & Instal Gomobile
         run: |
@@ -48,67 +49,20 @@ jobs:
         run: |
           cd /tmp/SlipNet
           make -C gomobile-build build-full
+          # Ganti AAR lama dengan yang baru (yang ada VayDNS-nya)
           cp app/libs/golibs-full.aar ${{ env.PROJECT_DIR }}/app/libs/golibs.aar
 
-      - name: Hapus setSayeMode dari DnsttWrapper.kt
+      - name: Bungkus Ulang Jadi ZIP Baru
         run: |
-          sed -i '/setSayeMode/d' ${{ env.PROJECT_DIR }}/app/src/main/java/com/alfydns/app/DnsttWrapper.kt
+          cd ${{ env.SRC_DIR }}
+          # Bungkus ulang semua isi proyek (termasuk AAR baru) ke dalam ZIP baru
+          zip -r $GITHUB_WORKSPACE/AlfyDNS-With-VayDNS.zip .
+          echo "ZIP baru berhasil dibuat."
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-
-      # PERBAIKAN: Generate Keystore di lokasi yang benar & Build
-      - name: Build Release APK (Signed & ABI Split)
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          # 1. Bikin keystore di folder proyek (PROJECT_DIR)
-          keytool -genkey -v -keystore release.keystore -alias alfykey -keyalg RSA -keysize 2048 -validity 10000 -storepass alfy123 -keypass alfy123 -dname "CN=Alfy, OU=Dev, O=Alfy, L=City, S=State, C=ID"
-          
-          # 2. Build dengan signing (path keystore disesuaikan)
-          gradle assembleRelease --no-daemon --stacktrace \
-            -Pandroid.injected.signing.store.file=${{ env.PROJECT_DIR }}/release.keystore \
-            -Pandroid.injected.signing.store.password=alfy123 \
-            -Pandroid.injected.signing.key.alias=alfykey \
-            -Pandroid.injected.signing.key.password=alfy123
-
-      - name: Cari APK arm64-v8a
-        id: ver
-        shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set +e
-          # Cari APK khusus arm64-v8a
-          APK=$(find . -path "*/release/*arm64-v8a*.apk" | head -n 1)
-          if [ -z "$APK" ]; then
-            echo "::warning::APK arm64-v8a tidak ditemukan, mencoba cari APK universal..."
-            APK=$(find . -path "*/release/*.apk" | head -n 1)
-          fi
-          if [ -z "$APK" ]; then
-            echo "::error::File APK tidak ditemukan."
-            exit 1
-          fi
-          
-          VN=$(grep -rhoE 'versionName *= *"[^"]+"' --include=build.gradle.kts --include=build.gradle . | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-          VN=${VN:-0}
-          APP_NAME="AlfyDNS-arm64"
-          cp "$APK" "$GITHUB_WORKSPACE/${APP_NAME}-v${VN}-${{ github.run_number }}.apk"
-          echo "apk=${APP_NAME}-v${VN}-${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VN}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AlfyDNS-arm64-apk
-          path: ${{ steps.ver.outputs.apk }}
-
-      - name: Buat GitHub Release
+      # Upload ZIP baru ke GitHub Release
+      - name: Upload ZIP to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: AlfyDNS ${{ steps.ver.outputs.tag }}
-          files: ${{ steps.ver.outputs.apk }}
+          tag_name: "vaydns-update-${{ github.run_number }}"
+          name: "AlfyDNS with VayDNS AAR"
+          files: ${{ github.workspace }}/AlfyDNS-With-VayDNS.zip
