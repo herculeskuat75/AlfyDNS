@@ -71,10 +71,9 @@ jobs:
           echo "Project root: $ROOT"
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: ${{ env.PROJECT_DIR }}
-        # TIPS: Jika sering gagal install (res=-18), ganti 'assembleDebug' jadi 'assembleRelease'
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Cari APK dan tentukan nama dinamis
         id: ver
